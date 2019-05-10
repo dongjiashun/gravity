@@ -509,11 +509,12 @@ func (scheduler *batchScheduler) startTableDispatcher(fullTableName string) {
 				if latches[h] == 0 {
 					delete(latches, h)
 					if len(batch) > 0 {
+						flushFunc()
 						// len(tableLatchC) == 0 is an optimization to
 						// reduce the "conflict/failure" of flushFunc.
-						if len(tableLatchC) == 0 {
-							flushFunc()
-						}
+						// if len(tableLatchC) == 0 {
+						// 	flushFunc()
+						// }
 					}
 				}
 				metrics.QueueLength.
