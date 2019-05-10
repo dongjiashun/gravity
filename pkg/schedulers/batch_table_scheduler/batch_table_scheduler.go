@@ -66,7 +66,7 @@ var (
 		Subsystem: "scheduler",
 		Name:      "flush_stats",
 		Help:      "flush stats",
-	}, []string{metrics.PipelineTag, "schema", "table", "stats"})
+	}, []string{metrics.PipelineTag, "table", "stats"})
 
 	NrDepHash = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "gravity",
@@ -399,10 +399,10 @@ func (scheduler *batchScheduler) dispatchMsg(msg *core.Msg) error {
 	return nil
 }
 
-func (scheduler *batchScheduler) startTableDispatcher(tableKey string) {
-	scheduler.tableBuffers[tableKey] = make(chan *core.Msg, scheduler.cfg.MaxBatchPerWorker*10)
+func (scheduler *batchScheduler) startTableDispatcher(fullTableName string) {
+	scheduler.tableBuffers[fullTableName] = make(chan *core.Msg, scheduler.cfg.MaxBatchPerWorker*10)
 
-	scheduler.tableLatchC[tableKey] = make(chan uint64, scheduler.cfg.MaxBatchPerWorker*10)
+	scheduler.tableLatchC[fullTableName] = make(chan uint64, scheduler.cfg.MaxBatchPerWorker*10)
 	scheduler.tableBufferWg.Add(1)
 
 	go func(c chan *core.Msg, tableLatchC chan uint64, key string) {
@@ -430,9 +430,9 @@ func (scheduler *batchScheduler) startTableDispatcher(tableKey string) {
 
 			defer func() {
 				if conflict {
-					FlushStats.WithLabelValues(scheduler.pipelineName, curBatch[0].Database, curBatch[0].Table, FlushConflict).Add(1)
+					FlushStats.WithLabelValues(scheduler.pipelineName, fullTableName, FlushConflict).Add(1)
 				} else {
-					FlushStats.WithLabelValues(scheduler.pipelineName, curBatch[0].Database, curBatch[0].Table, FlushOK).Add(1)
+					FlushStats.WithLabelValues(scheduler.pipelineName, fullTableName, FlushOK).Add(1)
 				}
 
 			}()
@@ -529,7 +529,7 @@ func (scheduler *batchScheduler) startTableDispatcher(tableKey string) {
 				}
 			}
 		}
-	}(scheduler.tableBuffers[tableKey], scheduler.tableLatchC[tableKey], tableKey)
+	}(scheduler.tableBuffers[fullTableName], scheduler.tableLatchC[fullTableName], fullTableName)
 }
 
 func (scheduler *batchScheduler) needFlush(qLen int, batch int, maxBatchSize int) bool {
