@@ -74,6 +74,20 @@ var (
 		Name:      "nr_dep_hash",
 		Help:      "nr_dep_hash",
 	}, []string{metrics.PipelineTag, "schema", "table"})
+
+	NrTableHashes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "gravity",
+		Subsystem: "scheduler",
+		Name:      "nr_table_hash",
+		Help:      "nr_table_hash",
+	}, []string{metrics.PipelineTag, "table"})
+
+	NrTableLatches = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "gravity",
+		Subsystem: "scheduler",
+		Name:      "nr_table_latches",
+		Help:      "nr_table_latches",
+	}, []string{metrics.PipelineTag, "table"})
 )
 
 // batch_scheduler package implements scheduler that dispatch job to workers that
@@ -132,7 +146,9 @@ func init() {
 		WorkerPoolJobBatchSizeGauge,
 		WorkerPoolSlidingWindowRatio,
 		FlushStats,
-		NrDepHash)
+		NrDepHash,
+		NrTableHashes,
+		NrTableLatches)
 }
 
 func (scheduler *batchScheduler) Configure(pipelineName string, configData map[string]interface{}) error {
@@ -452,6 +468,8 @@ func (scheduler *batchScheduler) startTableDispatcher(fullTableName string) {
 			for _, m := range curBatch {
 				for _, h := range m.OutputDepHashes {
 					latches[h.H] += 1
+					NrTableHashes.WithLabelValues(scheduler.pipelineName, fullTableName).Set(float64(len(latches)))
+					NrTableLatches.WithLabelValues(scheduler.pipelineName, fullTableName).Add(1)
 				}
 
 				oldCB := m.AfterAckCallback
@@ -503,6 +521,7 @@ func (scheduler *batchScheduler) startTableDispatcher(fullTableName string) {
 
 			case h := <-tableLatchC:
 				latches[h]--
+				NrTableLatches.WithLabelValues(scheduler.pipelineName, fullTableName).Add(-1)
 				if latches[h] < 0 {
 					log.Fatalf("latch operation bug: h = %v", h)
 				}
@@ -518,6 +537,7 @@ func (scheduler *batchScheduler) startTableDispatcher(fullTableName string) {
 						// }
 					}
 				}
+				NrTableHashes.WithLabelValues(scheduler.pipelineName, fullTableName).Set(float64(len(latches)))
 				metrics.QueueLength.
 					WithLabelValues(core.PipelineName, "table-latch", key).
 					Set(float64(len(tableLatchC)))
