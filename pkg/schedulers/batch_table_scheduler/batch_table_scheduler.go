@@ -480,7 +480,7 @@ func (scheduler *batchScheduler) startTableDispatcher(fullTableName string) {
 			return
 		}
 
-		ticker := time.NewTicker(5 * time.Millisecond)
+		ticker := time.NewTicker(1 * time.Millisecond)
 		defer ticker.Stop()
 
 		for {
