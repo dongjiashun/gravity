@@ -66,7 +66,7 @@ var (
 		Subsystem: "scheduler",
 		Name:      "flush_stats",
 		Help:      "flush stats",
-	}, []string{metrics.PipelineTag, "stats"})
+	}, []string{metrics.PipelineTag, "schema", "table", "stats"})
 
 	NrDepHash = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "gravity",
@@ -418,15 +418,6 @@ func (scheduler *batchScheduler) startTableDispatcher(tableKey string) {
 
 		flushFunc := func() (conflict bool) {
 
-			defer func() {
-				if conflict {
-					FlushStats.WithLabelValues(scheduler.pipelineName, FlushConflict).Add(1)
-				} else {
-					FlushStats.WithLabelValues(scheduler.pipelineName, FlushOK).Add(1)
-				}
-
-			}()
-
 			var curBatch []*core.Msg
 			batchLen := len(batch)
 			if batchLen > scheduler.cfg.MaxBatchPerWorker {
@@ -436,6 +427,15 @@ func (scheduler *batchScheduler) startTableDispatcher(tableKey string) {
 				curBatch = make([]*core.Msg, len(batch))
 				copy(curBatch, batch)
 			}
+
+			defer func() {
+				if conflict {
+					FlushStats.WithLabelValues(scheduler.pipelineName, curBatch[0].Database, curBatch[0].Table, FlushConflict).Add(1)
+				} else {
+					FlushStats.WithLabelValues(scheduler.pipelineName, curBatch[0].Database, curBatch[0].Table, FlushOK).Add(1)
+				}
+
+			}()
 
 			// if any item in the batch has latch, just return from flushFunc
 			for _, m := range curBatch {
