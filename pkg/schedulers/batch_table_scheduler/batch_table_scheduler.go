@@ -34,6 +34,11 @@ var DefaultConfig = map[string]interface{}{
 	"retry-sleep":         DefaultRetrySleepString,
 }
 
+const (
+	FlushConflict = "conflict"
+	FlushOK       = "ok"
+)
+
 var (
 	WorkerPoolWorkerCountGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "gravity",
@@ -55,6 +60,20 @@ var (
 		Name:      "sliding_window_ratio",
 		Help:      "sliding window ratio",
 	}, []string{metrics.PipelineTag, "input_stream_key"})
+
+	FlushStats = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "gravity",
+		Subsystem: "scheduler",
+		Name:      "flush_stats",
+		Help:      "flush stats",
+	}, []string{metrics.PipelineTag, "stats"})
+
+	NrDepHash = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "gravity",
+		Subsystem: "scheduler",
+		Name:      "nr_dep_hash",
+		Help:      "nr_dep_hash",
+	}, []string{metrics.PipelineTag, "schema", "table"})
 )
 
 // batch_scheduler package implements scheduler that dispatch job to workers that
@@ -108,9 +127,12 @@ type batchScheduler struct {
 func init() {
 	registry.RegisterPlugin(registry.SchedulerPlugin, BatchTableSchedulerName, &batchScheduler{}, false)
 
-	prometheus.MustRegister(WorkerPoolWorkerCountGauge)
-	prometheus.MustRegister(WorkerPoolJobBatchSizeGauge)
-	prometheus.MustRegister(WorkerPoolSlidingWindowRatio)
+	prometheus.MustRegister(
+		WorkerPoolWorkerCountGauge,
+		WorkerPoolJobBatchSizeGauge,
+		WorkerPoolSlidingWindowRatio,
+		FlushStats,
+		NrDepHash)
 }
 
 func (scheduler *batchScheduler) Configure(pipelineName string, configData map[string]interface{}) error {
@@ -360,6 +382,8 @@ func (scheduler *batchScheduler) dispatchMsg(msg *core.Msg) error {
 
 	tableKey := utils.TableIdentity(msg.Database, msg.Table)
 
+	NrDepHash.WithLabelValues(scheduler.pipelineName, msg.Database, msg.Table).Set(float64(len(msg.OutputDepHashes)))
+
 	scheduler.tableBuffersMutex.Lock()
 	defer scheduler.tableBuffersMutex.Unlock()
 
@@ -392,7 +416,16 @@ func (scheduler *batchScheduler) startTableDispatcher(tableKey string) {
 		// having the same output hash.
 		latches := make(map[uint64]int)
 
-		flushFunc := func() {
+		flushFunc := func() (conflict bool) {
+
+			defer func() {
+				if conflict {
+					FlushStats.WithLabelValues(scheduler.pipelineName, FlushConflict).Add(1)
+				} else {
+					FlushStats.WithLabelValues(scheduler.pipelineName, FlushOK).Add(1)
+				}
+
+			}()
 
 			var curBatch []*core.Msg
 			batchLen := len(batch)
@@ -409,6 +442,7 @@ func (scheduler *batchScheduler) startTableDispatcher(tableKey string) {
 				for _, h := range m.OutputDepHashes {
 					if latches[h.H] > 0 {
 						curBatch = nil
+						conflict = true
 						return
 					}
 				}
@@ -442,7 +476,10 @@ func (scheduler *batchScheduler) startTableDispatcher(tableKey string) {
 			}
 			batch = batch[len(curBatch):]
 			curBatch = nil
+			conflict = false
+			return
 		}
+
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 
