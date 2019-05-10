@@ -420,6 +420,7 @@ func (scheduler *batchScheduler) startTableDispatcher(fullTableName string) {
 
 			var curBatch []*core.Msg
 			batchLen := len(batch)
+
 			if batchLen > scheduler.cfg.MaxBatchPerWorker {
 				curBatch = make([]*core.Msg, scheduler.cfg.MaxBatchPerWorker)
 				copy(curBatch, batch[:scheduler.cfg.MaxBatchPerWorker])
@@ -526,7 +527,9 @@ func (scheduler *batchScheduler) startTableDispatcher(fullTableName string) {
 				if closing && len(batch) == 0 && len(latches) == 0 {
 					return
 				} else {
-					flushFunc()
+					if len(batch) > 0 {
+						flushFunc()
+					}
 				}
 			}
 		}
